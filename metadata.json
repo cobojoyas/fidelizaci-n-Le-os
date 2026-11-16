@@ -1,0 +1,10 @@
+{
+  "name": "Remix Leños Pizzería Fidelización",
+  "description": "Web App de Fidelización para Leños Pizzería con registro de usuarios y sistema de puntos.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

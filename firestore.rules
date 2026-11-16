@@ -1,0 +1,94 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        (request.auth.token.email == "ferortizcob@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    // Phase 2: Relationship Mapping
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Pillar 2: Validation Blueprint
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'lastName', 'phone', 'email', 'points', 'role', 'createdAt']) &&
+             data.keys().size() == 8 &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 50 &&
+             data.lastName is string && data.lastName.size() > 0 && data.lastName.size() <= 50 &&
+             data.phone is string && data.phone.size() >= 7 && data.phone.size() <= 20 &&
+             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
+             data.points is number && data.points >= 0 && data.points <= 6 &&
+             data.role in ['client', 'admin'] &&
+             data.createdAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin(); // Only admins can list all users
+
+      allow create: if isSignedIn() && 
+                    isValidId(userId) &&
+                    isValidUser(incoming()) &&
+                    incoming().uid == userId &&
+                    incoming().uid == request.auth.uid &&
+                    incoming().createdAt == request.time &&
+                    (
+                      (incoming().role == 'client' && incoming().points == 0) ||
+                      isAdmin()
+                    );
+
+      allow update: if isSignedIn() && isValidUser(incoming()) &&
+                    (
+                      // Action: Client Updates Profile
+                      (isOwner(userId) && 
+                       incoming().diff(existing()).affectedKeys().hasOnly(['name', 'lastName', 'phone']) &&
+                       incoming().uid == existing().uid &&
+                       incoming().email == existing().email &&
+                       incoming().points == existing().points &&
+                       incoming().role == existing().role &&
+                       incoming().createdAt == existing().createdAt) ||
+                      
+                      // Action: Admin Updates (Points, Role)
+                      (isAdmin() &&
+                       incoming().diff(existing()).affectedKeys().hasAny(['points', 'role', 'name', 'lastName', 'phone']) &&
+                       incoming().uid == existing().uid &&
+                       incoming().email == existing().email &&
+                       incoming().createdAt == existing().createdAt)
+                    );
+
+      allow delete: if isAdmin();
+    }
+  }
+}
